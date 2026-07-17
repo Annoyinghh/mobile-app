@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Standalone binary for USB deployment (downloaded in cloud hook)
+assets/agent/NetOpsAgent.exe
