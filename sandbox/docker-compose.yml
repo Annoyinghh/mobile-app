@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  pc-agent:
+    build:
+      context: ..
+      dockerfile: sandbox/Dockerfile.agent
+    container_name: netops-pc-agent-sandbox
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+    restart: unless-stopped
+
