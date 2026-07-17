@@ -21,6 +21,8 @@ release-key.jks
 credentials.json
 mobile-app/release-key.jks
 mobile-app/credentials.json
+mobile-app/assets/agent/NetOpsAgent.exe
+**/NetOpsAgent.exe
 
 # Environment variables
 .env
