@@ -19,9 +19,9 @@ uploads/
 *.jks
 release-key.jks
 credentials.json
-mobile-app/release-key.jks
-mobile-app/credentials.json
-mobile-app/assets/agent/NetOpsAgent.exe
+ops-helper/release-key.jks
+ops-helper/credentials.json
+ops-helper/assets/agent/NetOpsAgent.exe
 **/NetOpsAgent.exe
 
 # Environment variables

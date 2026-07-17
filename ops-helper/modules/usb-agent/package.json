@@ -1,0 +1,41 @@
+{
+  "name": "usb-agent",
+  "version": "1.0.0",
+  "description": "Expo module for USB Agent deployment and control",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "scripts": {
+    "build": "expo-module build",
+    "clean": "expo-module clean",
+    "lint": "expo-module lint",
+    "test": "expo-module test",
+    "prepare": "expo-module prepare",
+    "prepublishOnly": "expo-module prepublishOnly",
+    "expo-module": "expo-module"
+  },
+  "keywords": [
+    "expo",
+    "usb",
+    "adb",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-project/netops-repair.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-project/netops-repair/issues"
+  },
+  "author": "Xu Zhixuan",
+  "license": "MIT",
+  "homepage": "https://github.com/your-project/netops-repair#readme",
+  "dependencies": {},
+  "devDependencies": {
+    "expo-module-scripts": "^4.0.0"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
