@@ -77,53 +77,123 @@ export default function App() {
     resetAllData();
     if (wsRef.current) wsRef.current.close();
     addLog(`已切换为 ${connectionMode === 'wifi' ? 'WLAN 无线' : connectionMode === 'usb' ? 'USB 数据线' : '蓝牙'} 连接模式。`, 'system');
-  }, [connectionMode]);
+  }, [connectio  // 建立并监听 WebSocket 连接
+  function connectToWs(connectUrl) {
+    setConnecting(true);
+    try {
+      const socket = new WebSocket(connectUrl);
+      wsRef.current = socket;
 
-  // 当连接成功时，自动拉取初始资产数据
-  useEffect(() => {
-    if (isConnected) {
-      sendRequest('get_assets');
-      sendRequest('get_services');
-      sendRequest('get_reports');
+      socket.onopen = () => {
+        setIsConnected(true);
+        setConnecting(false);
+        addLog(`已成功连通设备: ${connectUrl}，进入控制大盘。`, 'recv');
+        sendRequest('ping');
+      };
+
+      socket.onclose = () => {
+        setIsConnected(false);
+        setConnecting(false);
+        addLog('网络连接关闭。', 'system');
+        resetAllData();
+        wsRef.current = null;
+      };
+
+      socket.onerror = () => {
+        setIsConnected(false);
+        setConnecting(false);
+        wsRef.current = null;
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const packet = JSON.parse(event.data);
+          const { type, event: eventName, request_id, status, data, error } = packet;
+
+          if (type === 'push') {
+            handlePush(eventName, data);
+          } else if (type === 'response') {
+            handleResponse(request_id, status, data, error);
+          }
+        } catch (e) {
+          // ignore
+        }
+      };
+    } catch (err) {
+      setConnecting(false);
     }
-  }, [isConnected]);
+  }
 
-  // 启动时自动进行 USB 即插即用连接检测
+  // 局域网或 USB 共享网段自动搜寻电脑端 Agent
+  async function scanForAgent() {
+    addLog('正在自动搜寻 USB 共享网络电脑设备...', 'system');
+    setConnecting(true);
+    
+    // 扫描常见的安卓 USB 热点网段
+    const subnets = ['192.168.42', '192.168.43', '192.168.49', '192.168.8', '192.168.137'];
+    const hostIds = [2, 3, 4, 5, 6, 7, 8, 129, 130, 131, 132];
+    
+    let foundUrl = null;
+    const promises = [];
+
+    for (const sub of subnets) {
+      for (const hid of hostIds) {
+        const targetIp = `${sub}.${hid}`;
+        const checkUrl = `http://${targetIp}:3001/health`;
+        
+        const promise = (async () => {
+          try {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), 1200);
+            const res = await fetch(checkUrl, { signal: controller.signal });
+            clearTimeout(id);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.status === 'ok') {
+                foundUrl = `ws://${targetIp}:3001`;
+              }
+            }
+          } catch (e) {}
+        })();
+        promises.push(promise);
+      }
+    }
+
+    // 针对本地开发和模拟器的 localhost 检测
+    promises.push((async () => {
+      try {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), 1000);
+        const res = await fetch('http://localhost:3001/health', { signal: controller.signal });
+        clearTimeout(id);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'ok') {
+            foundUrl = 'ws://localhost:3001';
+          }
+        }
+      } catch (e) {}
+    })());
+
+    await Promise.all(promises);
+
+    if (foundUrl) {
+      addLog(`发现可用讲台电脑: ${foundUrl}，正在连通...`, 'system');
+      connectToWs(foundUrl);
+    } else {
+      setIsConnected(false);
+      setConnecting(false);
+      addLog('未搜寻到已开启 Agent 的电脑。请检查 USB 共享网络是否开启。', 'system');
+    }
+  }
+
+  // 启动时自动运行扫描
   useEffect(() => {
     const timer = setTimeout(() => {
-      addLog('正在尝试自动检测并建立 USB 即插即用连接...', 'system');
-      setConnecting(true);
-      try {
-        const socket = new WebSocket('ws://localhost:3001');
-        wsRef.current = socket;
-
-        socket.onopen = () => {
-          setIsConnected(true);
-          setConnecting(false);
-          addLog('已自动连通 USB 数据线！进入快速控制状态。', 'recv');
-          sendRequest('ping');
-        };
-
-        socket.onclose = () => {
-          setIsConnected(false);
-          setConnecting(false);
-          addLog('未检测到活动 USB 调试设备。请插入数据线并配置映射。', 'system');
-          resetAllData();
-          wsRef.current = null;
-        };
-
-        socket.onerror = () => {
-          setIsConnected(false);
-          setConnecting(false);
-          wsRef.current = null;
-        };
-
-        socket.onmessage = (event) => {
-          try {
-            const packet = JSON.parse(event.data);
-            const { type, event: eventName, request_id, status, data, error } = packet;
-
-            if (type === 'push') {
+      scanForAgent();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);        if (type === 'push') {
               handlePush(eventName, data);
             } else if (type === 'response') {
               handleResponse(request_id, status, data, error);
@@ -160,52 +230,15 @@ export default function App() {
       return;
     }
 
-    const connectUrl = connectionMode === 'usb' ? usbUrl : url;
-    setConnecting(true);
-    addLog(`连接中: ${connectUrl}...`, 'system');
-
-    try {
-      const socket = new WebSocket(connectUrl);
-      wsRef.current = socket;
-
-      socket.onopen = () => {
-        setIsConnected(true);
-        setConnecting(false);
-        addLog('已成功建立与 PC Agent 的通信隧道。', 'recv');
-        sendRequest('ping');
-      };
-
-      socket.onclose = () => {
-        setIsConnected(false);
-        setConnecting(false);
-        addLog('网络连接关闭。', 'system');
-        resetAllData();
-        wsRef.current = null;
-      };
-
-      socket.onerror = () => {
-        addLog('建立 Socket 连接失败，请检查 Agent 是否在目标电脑运行。', 'err');
-        setConnecting(false);
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const packet = JSON.parse(event.data);
-          const { type, event: eventName, request_id, status, data, error } = packet;
-
-          if (type === 'push') {
-            handlePush(eventName, data);
-          } else if (type === 'response') {
-            handleResponse(request_id, status, data, error);
-          }
-        } catch (e) {
-          addLog(`解析错误: ${event.data.substring(0, 40)}...`, 'err');
-        }
-      };
-    } catch (err) {
-      addLog(`连接出错: ${err.message}`, 'err');
-      setConnecting(false);
+    if (connectionMode === 'usb') {
+      scanForAgent();
+      return;
     }
+
+    // Wi-Fi 模式连接
+    setConnecting(true);
+    addLog(`连接中: ${url}...`, 'system');
+    connectToWs(url);
   }
 
   // 发送指令请求
@@ -426,16 +459,13 @@ export default function App() {
             ) : (
               <View>
                 <View style={styles.stepBox}>
-                  <Text style={styles.stepText}>1. 用 USB 数据线将手机连接电脑。</Text>
-                  <Text style={styles.stepText}>2. 在手机中开启 <Text style={styles.boldText}>“USB 调试”</Text> 功能。</Text>
-                  <Text style={styles.stepText}>3. 在电脑命令终端运行端口映射指令：</Text>
-                  <View style={styles.codeBlock}><Text style={styles.codeText}>adb reverse tcp:3001 tcp:3001</Text></View>
-                  <Text style={styles.stepText}>4. 点击下方的“连接”按钮，通过 USB 数据线通信。</Text>
+                  <Text style={styles.stepText}>1. 用 USB 数据线将手机连接到电脑。</Text>
+                  <Text style={styles.stepText}>2. 打开手机的【系统设置 -> 移动网络 -> 个人热点】开启 <Text style={styles.boldText}>“USB 共享网络”</Text> (Tethering)。</Text>
+                  <Text style={styles.stepText}>3. 点击下方按钮，系统将自动搜寻并连通多媒体讲台电脑，即可直接管理！</Text>
                 </View>
                 <View style={styles.connectRow}>
-                  <TextInput style={[styles.input, { color: '#64748B' }]} value={usbUrl} editable={false} />
-                  <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={toggleConnection} disabled={connecting}>
-                    {connecting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.btnText}>连接</Text>}
+                  <TouchableOpacity style={[styles.btn, styles.btnPrimary, { flex: 1 }]} onPress={toggleConnection} disabled={connecting}>
+                    {connecting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.btnText}>🔍 自动搜寻并一键连接电脑</Text>}
                   </TouchableOpacity>
                 </View>
               </View>
