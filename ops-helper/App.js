@@ -143,18 +143,7 @@ export default function App() {
     setConnecting(true);
 
     try {
-      // 1. 检测 USB 设备
-      addLog('正在检测 USB 设备...', 'system');
-      const devices = await UsbAgentModule.getDevices();
-      if (!devices || devices.length === 0) {
-        addLog('未检测到 USB 设备，切换为网络扫描模式...', 'system');
-        // 降级到网络扫描
-        scanForAgent();
-        return;
-      }
-      addLog(`检测到设备: ${devices[0].productName || devices[0].deviceName}`, 'system');
-
-      // 2. 注册进度监听
+      // 注册进度监听
       const progressSub = UsbAgentModule.addOnDeployProgressListener((event) => {
         addLog(event.message, 'system');
       });
@@ -173,19 +162,17 @@ export default function App() {
         readySub?.remove();
       });
 
-      // 3. 启动自动部署
+      // 1. 启动自动部署（提取 ADB + Agent，推送，启动，转发）
       addLog('正在提取 ADB 工具和 Agent...', 'system');
       const result = await UsbAgentModule.startAutoDeploy();
       addLog(`部署完成: ${result.success ? '成功' : '失败'}`, result.success ? 'recv' : 'err');
 
       if (!result.success) {
-        // 部署失败，降级到网络扫描
         addLog('USB 自动部署未成功，切换为网络扫描模式...', 'system');
         scanForAgent();
       }
     } catch (e) {
       addLog(`USB 部署异常: ${e.message}，切换为网络扫描模式...`, 'err');
-      // 降级到网络扫描
       scanForAgent();
     }
   }
@@ -300,13 +287,28 @@ export default function App() {
     }
   }
 
-  // 启动时自动运行 USB 部署
+  // 启动时自动运行 USB 部署（带延迟确保模块加载完成）
   useEffect(() => {
     const timer = setTimeout(() => {
-      usbDeployAgent();
-    }, 1000);
+      if (connectionMode === 'usb') {
+        usbDeployAgent();
+      } else {
+        scanForAgent();
+      }
+    }, 2000);
     return () => clearTimeout(timer);
   }, []);
+
+  // USB 设备连接时自动触发部署
+  useEffect(() => {
+    const sub = UsbAgentModule.addOnUsbDeviceAttachedListener((event) => {
+      addLog(`USB 设备已连接: ${event.deviceName}`, 'system');
+      if (!isConnected && !connecting) {
+        usbDeployAgent();
+      }
+    });
+    return () => sub?.remove();
+  }, [isConnected, connecting]);
 
   function getTimestamp() {
     const now = new Date();
