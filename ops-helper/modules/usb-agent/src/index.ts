@@ -30,6 +30,10 @@ export interface ErrorEvent {
   message: string;
 }
 
+export interface DeployProgressEvent {
+  message: string;
+}
+
 const { UsbAgent } = NativeModules;
 
 if (!UsbAgent) {
@@ -64,6 +68,22 @@ export const UsbAgentModule = {
       throw new Error('UsbAgent module is not available');
     }
     return UsbAgent.startAutoDeploy();
+  },
+
+  /**
+   * 停止部署流程
+   */
+  async stopDeploy(): Promise<void> {
+    if (!UsbAgent) return;
+    return UsbAgent.stopDeploy();
+  },
+
+  /**
+   * 检查 Agent 是否就绪
+   */
+  async checkAgentReady(): Promise<boolean> {
+    if (!UsbAgent) return false;
+    return UsbAgent.checkAgentReady();
   },
 
   /**
@@ -104,6 +124,16 @@ export const UsbAgentModule = {
   ): EmitterSubscription | null {
     if (!eventEmitter) return null;
     return eventEmitter.addListener('onAgentReady', callback);
+  },
+
+  /**
+   * 监听部署进度事件
+   */
+  addOnDeployProgressListener(
+    callback: (event: DeployProgressEvent) => void
+  ): EmitterSubscription | null {
+    if (!eventEmitter) return null;
+    return eventEmitter.addListener('onDeployProgress', callback);
   },
 
   /**

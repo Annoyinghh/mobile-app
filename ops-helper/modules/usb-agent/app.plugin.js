@@ -60,13 +60,16 @@ function withUsbAndroidManifest(config) {
 }
 
 /**
- * 自动写入 device_filter.xml 资源文件
+ * 自动写入 device_filter.xml 并拷贝原生 assets
  */
 function withUsbDeviceFilter(config) {
   return withDangerousMod(config, [
     'android',
     async (config) => {
-      const resDir = path.join(config.modRequest.platformProjectRoot, 'app/src/main/res');
+      const platformDir = config.modRequest.platformProjectRoot;
+      
+      // 1. 写入 XML 设备过滤器
+      const resDir = path.join(platformDir, 'app/src/main/res');
       const xmlDir = path.join(resDir, 'xml');
       if (!fs.existsSync(xmlDir)) {
         fs.mkdirSync(xmlDir, { recursive: true });
@@ -78,6 +81,33 @@ function withUsbDeviceFilter(config) {
     <usb-device />
 </resources>`;
       fs.writeFileSync(filterPath, deviceFilterContent, 'utf-8');
+
+      // 2. 拷贝 native assets (adb.exe, NetOpsAgent.exe, dlls) 到 android/app/src/main/assets/
+      const nativeAssetsDir = path.join(platformDir, 'app/src/main/assets');
+      if (!fs.existsSync(nativeAssetsDir)) {
+        fs.mkdirSync(nativeAssetsDir, { recursive: true });
+      }
+
+      const projectRoot = config.modRequest.projectRoot;
+      const toolsSrcDir = path.join(projectRoot, 'assets/tools');
+      const agentSrcDir = path.join(projectRoot, 'assets/agent');
+
+      const filesToCopy = [
+        { src: path.join(toolsSrcDir, 'adb.exe'), dest: 'adb.exe' },
+        { src: path.join(toolsSrcDir, 'AdbWinApi.dll'), dest: 'AdbWinApi.dll' },
+        { src: path.join(toolsSrcDir, 'AdbWinUsbApi.dll'), dest: 'AdbWinUsbApi.dll' },
+        { src: path.join(agentSrcDir, 'NetOpsAgent.exe'), dest: 'NetOpsAgent.exe' },
+      ];
+
+      for (const item of filesToCopy) {
+        if (fs.existsSync(item.src)) {
+          fs.copyFileSync(item.src, path.join(nativeAssetsDir, item.dest));
+          console.log(`[UsbAgent] Copied ${item.src} to native assets as ${item.dest}`);
+        } else {
+          console.warn(`[UsbAgent] Source file not found: ${item.src}`);
+        }
+      }
+
       return config;
     },
   ]);
@@ -97,7 +127,7 @@ function withUsbAgent(config) {
   // 修改 AndroidManifest
   config = withUsbAndroidManifest(config);
 
-  // 写入 XML 设备过滤器
+  // 写入 XML 设备过滤器并准备原生 assets
   config = withUsbDeviceFilter(config);
 
   return config;

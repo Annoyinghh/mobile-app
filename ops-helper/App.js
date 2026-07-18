@@ -13,6 +13,7 @@ import {
   FlatList,
 } from 'react-native';
 import * as Network from 'expo-network';
+import UsbAgentModule from './modules/usb-agent';
 
 export default function App() {
   // 连接状态
@@ -136,6 +137,59 @@ export default function App() {
     }
   }
 
+  // USB 模式：调用原生模块自动部署 Agent
+  async function usbDeployAgent() {
+    addLog('正在启动 USB 自动部署流程...', 'system');
+    setConnecting(true);
+
+    try {
+      // 1. 检测 USB 设备
+      addLog('正在检测 USB 设备...', 'system');
+      const devices = await UsbAgentModule.getDevices();
+      if (!devices || devices.length === 0) {
+        addLog('未检测到 USB 设备，切换为网络扫描模式...', 'system');
+        // 降级到网络扫描
+        scanForAgent();
+        return;
+      }
+      addLog(`检测到设备: ${devices[0].productName || devices[0].deviceName}`, 'system');
+
+      // 2. 注册进度监听
+      const progressSub = UsbAgentModule.addOnDeployProgressListener((event) => {
+        addLog(event.message, 'system');
+      });
+
+      const errorSub = UsbAgentModule.addOnErrorListener((event) => {
+        addLog(`错误: ${event.message}`, 'err');
+      });
+
+      const readySub = UsbAgentModule.addOnAgentReadyListener(async (event) => {
+        addLog(`Agent 已就绪，端口: ${event.port}`, 'recv');
+        // 通过 ADB 端口转发连接 localhost
+        connectToWs('ws://localhost:3001');
+        // 清理监听
+        progressSub?.remove();
+        errorSub?.remove();
+        readySub?.remove();
+      });
+
+      // 3. 启动自动部署
+      addLog('正在提取 ADB 工具和 Agent...', 'system');
+      const result = await UsbAgentModule.startAutoDeploy();
+      addLog(`部署完成: ${result.success ? '成功' : '失败'}`, result.success ? 'recv' : 'err');
+
+      if (!result.success) {
+        // 部署失败，降级到网络扫描
+        addLog('USB 自动部署未成功，切换为网络扫描模式...', 'system');
+        scanForAgent();
+      }
+    } catch (e) {
+      addLog(`USB 部署异常: ${e.message}，切换为网络扫描模式...`, 'err');
+      // 降级到网络扫描
+      scanForAgent();
+    }
+  }
+
   // 局域网或 USB 共享网段自动搜寻电脑端 Agent
   async function scanForAgent() {
     addLog('正在自动搜寻 USB 共享网络电脑设备...', 'system');
@@ -246,10 +300,10 @@ export default function App() {
     }
   }
 
-  // 启动时自动运行扫描
+  // 启动时自动运行 USB 部署
   useEffect(() => {
     const timer = setTimeout(() => {
-      scanForAgent();
+      usbDeployAgent();
     }, 1000);
     return () => clearTimeout(timer);
   }, []);
@@ -276,7 +330,7 @@ export default function App() {
     }
 
     if (connectionMode === 'usb') {
-      scanForAgent();
+      usbDeployAgent();
       return;
     }
 
