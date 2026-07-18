@@ -3,6 +3,9 @@
     "android"
   ],
   "android": {
-    "package": "expo.modules.usbagent"
+    "package": "expo.modules.usbagent",
+    "modules": [
+      "expo.modules.usbagent.UsbAgentModule"
+    ]
   }
 }
