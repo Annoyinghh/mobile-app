@@ -1,17 +1,8 @@
-name = "usb-agent"
-
-[library]
-version = "1.0.0"
-platforms = ["android"]
-
-[android]
-minSdkVersion = "21"
-targetSdkVersion = "34"
-compileSdkVersion = "34"
-
-[android.permissions]
-required = [
-  "android.permission.USB_PERMISSION",
-  "android.permission.INTERNET",
-  "android.permission.ACCESS_NETWORK_STATE"
-]
+{
+  "platforms": [
+    "android"
+  ],
+  "android": {
+    "package": "expo.modules.usbagent"
+  }
+}
