@@ -12,6 +12,7 @@
     },
     "android": {
       "package": "com.xuzhixuan.netopsrepair",
+      "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.USB_PERMISSION",
         "android.permission.INTERNET",
@@ -33,9 +34,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "449e3d98-b2b0-4ed4-9a93-631045c0e128"
+        "projectId": "e8a063e4-b010-454d-a3d8-e768ac639b57"
       }
     },
-    "owner": "zixuan.xue"
+    "owner": "zixuan-xue"
   }
 }

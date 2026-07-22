@@ -20,6 +20,11 @@ function withUsbAndroidManifest(config) {
       androidManifest.manifest['$'] = {};
     }
 
+    const application = androidManifest.manifest['application']?.[0];
+    if (application?.$) {
+      application.$['android:usesCleartextTraffic'] = 'true';
+    }
+
     // 添加 uses-feature
     if (!androidManifest.manifest['uses-feature']) {
       androidManifest.manifest['uses-feature'] = [];

@@ -15,11 +15,16 @@ import {
 import * as Network from 'expo-network';
 import UsbAgentModule from 'usb-agent';
 
+const AGENT_PORT = 3001;
+const USB_TETHER_DEFAULT_URL = `ws://192.168.42.2:${AGENT_PORT}`;
+const SCAN_TIMEOUT_MS = 1200;
+const SCAN_CONCURRENCY = 12;
+
 export default function App() {
   // 连接状态
   const [connectionMode, setConnectionMode] = useState('usb');
-  const [url, setUrl] = useState('ws://localhost:3001'); // 默认连接 localhost
-  const [usbUrl, setUsbUrl] = useState('ws://localhost:3001');
+  const [url, setUrl] = useState('');
+  const [usbUrl, setUsbUrl] = useState(USB_TETHER_DEFAULT_URL);
   const [isConnected, setIsConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
 
@@ -138,7 +143,19 @@ export default function App() {
   }
 
   // USB 模式：调用原生模块自动部署 Agent
+  // Android cannot run Windows ADB or copy an EXE to a PC over a normal USB cable.
+  // USB mode therefore uses the IP network provided by USB tethering.
   async function usbDeployAgent() {
+    const manualUrl = normalizeAgentUrl(usbUrl);
+    if (manualUrl && usbUrl !== USB_TETHER_DEFAULT_URL) {
+      addLog(`正在连接电脑端 Agent：${manualUrl}`, 'system');
+      connectToWs(manualUrl);
+      return;
+    }
+    await scanForAgent();
+  }
+
+  async function legacyUsbDeployAgent() {
     addLog('正在启动 USB 自动部署流程...', 'system');
     setConnecting(true);
 
@@ -178,7 +195,7 @@ export default function App() {
   }
 
   // 局域网或 USB 共享网段自动搜寻电脑端 Agent
-  async function scanForAgent() {
+  async function legacyScanForAgent() {
     addLog('正在自动搜寻 USB 共享网络电脑设备...', 'system');
     setConnecting(true);
     
@@ -310,6 +327,81 @@ export default function App() {
     return () => sub?.remove();
   }, [isConnected, connecting]);
 
+  function normalizeAgentUrl(value) {
+    let candidate = (value || '').trim();
+    if (!candidate) return null;
+    if (!/^wss?:\/\//i.test(candidate)) candidate = `ws://${candidate}`;
+    candidate = candidate.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+    const match = candidate.match(/^(wss?:\/\/)([^/:]+)(?::(\d+))?\/?$/i);
+    if (!match) return null;
+    return `${match[1].toLowerCase()}${match[2]}:${match[3] || AGENT_PORT}`;
+  }
+
+  async function probeAgent(host) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SCAN_TIMEOUT_MS);
+    try {
+      const response = await fetch(`http://${host}:${AGENT_PORT}/health`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) return null;
+      const body = await response.json();
+      return body?.status === 'ok' ? `ws://${host}:${AGENT_PORT}` : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function findFirstAgent(hosts) {
+    let nextIndex = 0;
+    let result = null;
+    const workers = Array.from({ length: Math.min(SCAN_CONCURRENCY, hosts.length) }, async () => {
+      while (!result && nextIndex < hosts.length) {
+        const found = await probeAgent(hosts[nextIndex++]);
+        if (found) result = found;
+      }
+    });
+    await Promise.all(workers);
+    return result;
+  }
+
+  // Scan a bounded number of hosts at a time. The old implementation created
+  // hundreds of simultaneous requests, which Android often throttles or drops.
+  async function scanForAgent() {
+    addLog('正在查找已运行的电脑端 Agent…', 'system');
+    setConnecting(true);
+
+    const candidates = new Set();
+    for (const subnet of ['192.168.42', '192.168.43', '192.168.49', '192.168.137']) {
+      for (let host = 2; host <= 16; host += 1) candidates.add(`${subnet}.${host}`);
+    }
+
+    try {
+      const ip = await Network.getIpAddressAsync();
+      const match = ip.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.(\d{1,3})$/);
+      if (match && ip !== '127.0.0.1' && ip !== '0.0.0.0') {
+        const ownHost = Number(match[2]);
+        for (let host = 1; host <= 254; host += 1) {
+          if (host !== ownHost) candidates.add(`${match[1]}.${host}`);
+        }
+      }
+    } catch (error) {
+      addLog(`未能读取手机网络地址：${error.message || error}`, 'system');
+    }
+
+    const foundUrl = await findFirstAgent([...candidates]);
+    if (foundUrl) {
+      addLog(`已发现电脑端 Agent：${foundUrl}，正在连接…`, 'recv');
+      connectToWs(foundUrl);
+    } else {
+      setIsConnected(false);
+      setConnecting(false);
+      addLog('未发现电脑端 Agent。请确认电脑已以管理员身份运行 NetOpsAgent.exe，且 USB 共享网络已开启。', 'err');
+    }
+  }
+
   function getTimestamp() {
     const now = new Date();
     return now.toTimeString().substring(0, 8);
@@ -336,10 +428,13 @@ export default function App() {
       return;
     }
 
-    // Wi-Fi 模式连接
-    setConnecting(true);
-    addLog(`连接中: ${url}...`, 'system');
-    connectToWs(url);
+    const manualUrl = normalizeAgentUrl(url);
+    if (!manualUrl) {
+      Alert.alert('地址无效', '请输入电脑端 Agent 地址，例如 ws://192.168.1.100:3001。');
+      return;
+    }
+    addLog(`连接中: ${manualUrl}…`, 'system');
+    connectToWs(manualUrl);
   }
 
   // 发送指令请求
@@ -562,8 +657,17 @@ export default function App() {
                 <View style={styles.stepBox}>
                   <Text style={styles.stepText}>1. 用 USB 数据线将手机连接到电脑。</Text>
                   <Text style={styles.stepText}>2. 打开手机的【系统设置 -> 移动网络 -> 个人热点】开启 <Text style={styles.boldText}>“USB 共享网络”</Text> (Tethering)。</Text>
-                  <Text style={styles.stepText}>3. 点击下方按钮，系统将自动搜寻并连通多媒体讲台电脑，即可直接管理！</Text>
+                  <Text style={styles.stepText}>3. 在电脑上以管理员身份运行 NetOpsAgent.exe；首次运行会开放仅限专用网络的 3001 端口。</Text>
+                  <Text style={styles.stepText}>4. 点击下方按钮自动查找电脑；若未找到，可填写电脑 USB 网卡地址后连接。</Text>
                 </View>
+                <TextInput
+                  style={styles.input}
+                  value={usbUrl}
+                  onChangeText={setUsbUrl}
+                  placeholder="ws://192.168.42.2:3001（可选）"
+                  placeholderTextColor="#64748B"
+                  autoCapitalize="none"
+                />
                 <View style={styles.connectRow}>
                   <TouchableOpacity style={[styles.btn, styles.btnPrimary, { flex: 1 }]} onPress={toggleConnection} disabled={connecting}>
                     {connecting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.btnText}>🔍 自动搜寻并一键连接电脑</Text>}

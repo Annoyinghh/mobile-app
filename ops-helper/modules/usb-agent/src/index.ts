@@ -4,7 +4,7 @@
  * 自动推送 Agent 到电脑并启动
  */
 
-import { NativeModules, NativeEventEmitter, EmitterSubscription } from 'react-native';
+import { requireNativeModule, EventEmitter, EventSubscription } from 'expo-modules-core';
 
 export interface UsbDevice {
   deviceId: number;
@@ -34,13 +34,9 @@ export interface DeployProgressEvent {
   message: string;
 }
 
-const { UsbAgent } = NativeModules;
+const UsbAgent = requireNativeModule('UsbAgent');
 
-if (!UsbAgent) {
-  console.warn('UsbAgent native module is not available. Make sure you are using a development build.');
-}
-
-const eventEmitter = UsbAgent ? new NativeEventEmitter(UsbAgent) : null;
+const eventEmitter = new EventEmitter(UsbAgent);
 
 /**
  * USB Agent 模块
@@ -101,8 +97,8 @@ export const UsbAgentModule = {
    */
   addOnUsbDeviceAttachedListener(
     callback: (event: UsbDeviceEvent) => void
-  ): EmitterSubscription | null {
-    if (!eventEmitter) return null;
+  ): EventSubscription {
+    // @ts-ignore
     return eventEmitter.addListener('onUsbDeviceAttached', callback);
   },
 
@@ -111,8 +107,8 @@ export const UsbAgentModule = {
    */
   addOnUsbDeviceDetachedListener(
     callback: (event: UsbDeviceEvent) => void
-  ): EmitterSubscription | null {
-    if (!eventEmitter) return null;
+  ): EventSubscription {
+    // @ts-ignore
     return eventEmitter.addListener('onUsbDeviceDetached', callback);
   },
 
@@ -121,8 +117,8 @@ export const UsbAgentModule = {
    */
   addOnAgentReadyListener(
     callback: (event: AgentReadyEvent) => void
-  ): EmitterSubscription | null {
-    if (!eventEmitter) return null;
+  ): EventSubscription {
+    // @ts-ignore
     return eventEmitter.addListener('onAgentReady', callback);
   },
 
@@ -131,8 +127,8 @@ export const UsbAgentModule = {
    */
   addOnDeployProgressListener(
     callback: (event: DeployProgressEvent) => void
-  ): EmitterSubscription | null {
-    if (!eventEmitter) return null;
+  ): EventSubscription {
+    // @ts-ignore
     return eventEmitter.addListener('onDeployProgress', callback);
   },
 
@@ -141,8 +137,8 @@ export const UsbAgentModule = {
    */
   addOnErrorListener(
     callback: (event: ErrorEvent) => void
-  ): EmitterSubscription | null {
-    if (!eventEmitter) return null;
+  ): EventSubscription {
+    // @ts-ignore
     return eventEmitter.addListener('onError', callback);
   },
 };
