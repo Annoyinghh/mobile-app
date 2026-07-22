@@ -11,6 +11,7 @@ import {
   Alert,
   StatusBar,
   FlatList,
+  Platform,
 } from 'react-native';
 import * as Network from 'expo-network';
 import UsbAgentModule from 'usb-agent';
@@ -19,6 +20,14 @@ const AGENT_PORT = 3001;
 const USB_TETHER_DEFAULT_URL = `ws://192.168.42.2:${AGENT_PORT}`;
 const SCAN_TIMEOUT_MS = 1200;
 const SCAN_CONCURRENCY = 12;
+const COMMAND_PRESETS = [
+  { label: '系统信息', command: 'systeminfo' },
+  { label: '网络配置', command: 'ipconfig /all' },
+  { label: '网络连通性', command: 'ping 223.5.5.5 -n 4' },
+  { label: '端口连接', command: 'netstat -ano' },
+  { label: '运行进程', command: 'tasklist' },
+  { label: '磁盘空间', command: 'powershell -NoProfile -Command "Get-Volume | Select-Object DriveLetter,FileSystemLabel,SizeRemaining,Size | Format-Table -AutoSize"' },
+];
 
 export default function App() {
   // 连接状态
@@ -27,6 +36,7 @@ export default function App() {
   const [usbUrl, setUsbUrl] = useState(USB_TETHER_DEFAULT_URL);
   const [isConnected, setIsConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [autoStartEnabled, setAutoStartEnabled] = useState(null);
 
   // Tab 菜单切换: 'assets' | 'monitor' | 'netsec' | 'repairs' | 'remote' | 'inspection'
   const [currentTab, setCurrentTab] = useState('assets');
@@ -92,6 +102,7 @@ export default function App() {
       sendRequest('get_assets');
       sendRequest('get_services');
       sendRequest('get_reports');
+      sendRequest('agent_autostart_status');
     }
   }, [isConnected]);
 
@@ -437,6 +448,19 @@ export default function App() {
     connectToWs(manualUrl);
   }
 
+  function runRemoteCommand(command) {
+    const normalizedCommand = (command || '').trim();
+    if (!normalizedCommand) {
+      Alert.alert('请输入命令', '可选择下方预设命令，或手动输入 Windows 命令。');
+      return;
+    }
+    if (!isConnected || runningCmd) return;
+    setCmdInput(normalizedCommand);
+    setRunningCmd(true);
+    setCmdOutput('命令发送中，等待 Agent 回传...');
+    sendRequest('remote_cmd', { cmd: normalizedCommand });
+  }
+
   // 发送指令请求
   function sendRequest(action, params = {}) {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -527,6 +551,11 @@ export default function App() {
       } else if (req.action === 'remote_cmd') {
         setRunningCmd(false);
         setCmdOutput(data.stdout || data.stderr || '指令已执行，无控制台输出。');
+      } else if (req.action === 'agent_autostart') {
+        setAutoStartEnabled(Boolean(data?.enabled));
+        Alert.alert('设置完成', data.message || '电脑端自动启动设置已更新。');
+      } else if (req.action === 'agent_autostart_status') {
+        setAutoStartEnabled(Boolean(data?.enabled));
       } else if (req.action === 'collect_logs') {
         setCollectingLogs(false);
         setDownloadLink(data.file);
@@ -574,11 +603,12 @@ export default function App() {
     setDownloadLink('');
     setInspectionResult(null);
     setReportsList([]);
+    setAutoStartEnabled(null);
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="#0B0F19" translucent={true} />
       
       {/* 头部Logo及状态 */}
       <View style={styles.header}>
@@ -1057,13 +1087,21 @@ export default function App() {
                 placeholderTextColor="#64748B"
                 autoCapitalize="none"
               />
+              <View style={styles.presetGrid}>
+                {COMMAND_PRESETS.map((preset) => (
+                  <TouchableOpacity
+                    key={preset.label}
+                    style={[styles.presetButton, (!isConnected || runningCmd) && styles.presetButtonDisabled]}
+                    onPress={() => runRemoteCommand(preset.command)}
+                    disabled={!isConnected || runningCmd}
+                  >
+                    <Text style={styles.presetButtonText}>{preset.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TouchableOpacity
                 style={[styles.btn, styles.btnPrimary, { width: 120 }]}
-                onPress={() => {
-                  setRunningCmd(true);
-                  setCmdOutput('命令发送中，等待 Agent 回传...');
-                  sendRequest('remote_cmd', { cmd: cmdInput });
-                }}
+                onPress={() => runRemoteCommand(cmdInput)}
                 disabled={!isConnected || runningCmd}
               >
                 {runningCmd ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.btnText}>发送命令</Text>}
@@ -1074,6 +1112,30 @@ export default function App() {
                   <Text style={styles.terminalText}>{cmdOutput}</Text>
                 </View>
               ) : null}
+            </View>
+
+            <Text style={styles.sectionHeader}>电脑端后台启动</Text>
+            <View style={styles.card}>
+              <Text style={styles.guideText}>首次连接后可设置开机自动后台启动。登录后不会显示 CMD 窗口；该操作需要 Agent 首次以管理员身份启动。</Text>
+              <Text style={styles.autoStartState}>
+                {autoStartEnabled === null ? '正在检查开机自启状态…' : autoStartEnabled ? '当前状态：已开启（后台隐藏运行）' : '当前状态：未开启'}
+              </Text>
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.btn, styles.btnPrimary, styles.actionButton]}
+                  onPress={() => sendRequest('agent_autostart', { enabled: true })}
+                  disabled={!isConnected}
+                >
+                  <Text style={styles.btnText}>设置开机自启</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.btnOutline, styles.actionButton]}
+                  onPress={() => sendRequest('agent_autostart', { enabled: false })}
+                  disabled={!isConnected || autoStartEnabled === false}
+                >
+                  <Text style={styles.btnOutlineText}>关闭开机自启</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <Text style={styles.sectionHeader}>补丁上传与文件推送</Text>
@@ -1207,23 +1269,25 @@ function reportStyle(status) {
   return {
     fontSize: 12,
     fontWeight: '700',
-    color: status === '正常' ? '#10B981' : '#F59E0B'
+    color: status === '正常' ? '#34D399' : '#F87171'
   };
 }
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0A0D14',
+    backgroundColor: '#0B0F19',
+    paddingTop: STATUS_BAR_HEIGHT,
   },
   header: {
-    height: 54,
-    paddingHorizontal: 16,
+    height: 60,
+    paddingHorizontal: 18,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    backgroundColor: '#0B0F19',
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   logoRow: {
     flexDirection: 'row',
@@ -1233,210 +1297,249 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#3B82F6',
+    backgroundColor: '#38BDF8',
     marginRight: 8,
   },
   headerTitle: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
-    color: '#F3F4F6',
+    color: '#F8FAFC',
+    letterSpacing: 0.3,
   },
   statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
   },
   badgeConnected: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
     borderWidth: 1,
-    borderColor: '#10B981',
+    borderColor: '#34D399',
   },
   badgeDisconnected: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: 'rgba(248, 113, 113, 0.15)',
     borderWidth: 1,
-    borderColor: '#EF4444',
+    borderColor: '#F87171',
   },
   statusText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#F3F4F6',
+    color: '#F8FAFC',
   },
   modeSelector: {
     flexDirection: 'row',
-    backgroundColor: '#0E131F',
+    backgroundColor: '#0F172A',
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
-    padding: 4,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    padding: 6,
+    gap: 6,
   },
   modeTab: {
     flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 10,
   },
   modeTabActive: {
-    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.4)',
   },
   modeTabText: {
-    fontSize: 11,
-    color: '#64748B',
+    fontSize: 13,
+    color: '#94A3B8',
     fontWeight: '600',
   },
   modeTabTextActive: {
-    color: '#3B82F6',
+    color: '#38BDF8',
+    fontWeight: '700',
   },
   tabBarContainer: {
-    backgroundColor: '#0A0D14',
+    backgroundColor: '#0F172A',
     borderBottomWidth: 1,
-    borderBottomColor: '#1D2433',
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   tabScroll: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   tabButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    marginRight: 10,
-    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderRadius: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   tabButtonActive: {
-    backgroundColor: '#3B82F6',
-    borderColor: '#3B82F6',
+    backgroundColor: '#38BDF8',
+    borderColor: '#38BDF8',
   },
   tabButtonText: {
-    fontSize: 11,
-    color: '#9CA3AF',
+    fontSize: 13,
+    color: '#94A3B8',
     fontWeight: '600',
   },
   tabButtonTextActive: {
-    color: '#FFF',
+    color: '#0F172A',
+    fontWeight: '700',
   },
   scrollContainer: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 40,
   },
   card: {
-    backgroundColor: 'rgba(17, 22, 34, 0.85)',
+    backgroundColor: '#131B2E',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 16,
   },
   cardTitle: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     textTransform: 'uppercase',
-    color: '#9CA3AF',
-    marginBottom: 12,
+    color: '#38BDF8',
+    marginBottom: 14,
+    letterSpacing: 0.5,
   },
   guideText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginBottom: 10,
-    lineHeight: 16,
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 12,
+    lineHeight: 20,
   },
   connectRow: {
     flexDirection: 'row',
+    gap: 8,
   },
   input: {
     flex: 1,
-    backgroundColor: '#05070A',
+    backgroundColor: '#0B0F19',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    color: '#F3F4F6',
-    fontSize: 13,
-    marginRight: 8,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    color: '#F8FAFC',
+    fontSize: 14,
+    height: 48,
   },
   singleInput: {
-    backgroundColor: '#05070A',
+    backgroundColor: '#0B0F19',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 10,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    color: '#F8FAFC',
+    fontSize: 14,
+    height: 48,
+    marginBottom: 12,
+  },
+  presetGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  presetButton: {
     paddingHorizontal: 12,
-    color: '#F3F4F6',
-    fontSize: 13,
-    height: 40,
-    marginBottom: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+  },
+  presetButtonDisabled: {
+    opacity: 0.45,
+  },
+  presetButtonText: {
+    color: '#7DD3FC',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionButton: {
+    flex: 1,
   },
   btn: {
-    height: 40,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    height: 48,
+    paddingHorizontal: 18,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   btnPrimary: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: '#38BDF8',
   },
   btnSecondary: {
     backgroundColor: '#334155',
   },
   btnDanger: {
-    backgroundColor: '#EF4444',
+    backgroundColor: '#F87171',
   },
   btnOutline: {
     borderWidth: 1,
-    borderColor: '#3b82f6',
+    borderColor: '#38BDF8',
     backgroundColor: 'transparent',
     width: '100%',
-    height: 42,
+    height: 48,
   },
   btnOutlineText: {
-    color: '#3b82f6',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#38BDF8',
+    fontSize: 13,
+    fontWeight: '700',
   },
   btnText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
+    color: '#0F172A',
+    fontSize: 14,
+    fontWeight: '700',
   },
   stepBox: {
-    backgroundColor: '#05070A',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 12,
+    backgroundColor: '#0B0F19',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.03)',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   stepText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    lineHeight: 18,
-    marginBottom: 6,
+    fontSize: 12,
+    color: '#94A3B8',
+    lineHeight: 20,
+    marginBottom: 8,
   },
   boldText: {
-    color: '#F3F4F6',
+    color: '#F8FAFC',
     fontWeight: '700',
   },
   codeBlock: {
     backgroundColor: '#1E293B',
-    padding: 6,
-    borderRadius: 6,
-    marginVertical: 4,
-    paddingHorizontal: 10,
+    padding: 8,
+    borderRadius: 8,
+    marginVertical: 6,
+    paddingHorizontal: 12,
   },
   codeText: {
     fontFamily: 'monospace',
-    fontSize: 10,
-    color: '#10B981',
+    fontSize: 12,
+    color: '#34D399',
   },
   sectionHeader: {
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     textTransform: 'uppercase',
     color: '#64748B',
-    marginBottom: 8,
+    marginBottom: 10,
     marginLeft: 2,
+    letterSpacing: 0.5,
   },
   telemetryRow: {
     flexDirection: 'row',
@@ -1449,27 +1552,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   gaugeTitle: {
-    fontSize: 11,
-    color: '#9CA3AF',
+    fontSize: 12,
+    color: '#94A3B8',
     marginBottom: 6,
   },
   gaugeValue: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#F3F4F6',
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#F8FAFC',
     marginBottom: 8,
   },
   barContainer: {
     width: '100%',
-    height: 6,
+    height: 8,
     backgroundColor: '#0F172A',
-    borderRadius: 3,
+    borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 6,
   },
   barFill: {
     height: '100%',
-    borderRadius: 3,
+    borderRadius: 4,
   },
   diskRow: {
     flexDirection: 'row',
@@ -1477,172 +1580,172 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   diskLabel: {
-    fontSize: 12,
-    color: '#F3F4F6',
+    fontSize: 13,
+    color: '#F8FAFC',
+    fontWeight: '600',
   },
   diskValue: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10B981',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#34D399',
   },
   diskDetails: {
-    fontSize: 10,
+    fontSize: 12,
     color: '#64748B',
     marginTop: 4,
   },
   divider: {
     height: 1,
-    backgroundColor: '#1E293B',
-    marginVertical: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: 14,
   },
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginVertical: 4,
+    marginVertical: 6,
   },
   metaLbl: {
-    fontSize: 11,
-    color: '#9CA3AF',
+    fontSize: 13,
+    color: '#94A3B8',
   },
   metaVal: {
-    fontSize: 11,
-    color: '#F3F4F6',
-    fontWeight: '500',
+    fontSize: 13,
+    color: '#F8FAFC',
+    fontWeight: '600',
   },
   btnGrid: {
     flexDirection: 'row',
   },
   repairDesc: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginBottom: 12,
+    fontSize: 13,
+    color: '#94A3B8',
+    marginBottom: 14,
+    lineHeight: 20,
   },
   tabsRow: {
     flexDirection: 'row',
-    backgroundColor: '#05070A',
-    borderRadius: 10,
-    padding: 3,
-    marginBottom: 12,
-  },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
+    backgroundColor: '#0B0F19',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 14,
   },
   tabActive: {
     backgroundColor: '#1E293B',
   },
   tabText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '500',
     color: '#64748B',
   },
   tabTextActive: {
-    color: '#F3F4F6',
+    color: '#F8FAFC',
   },
   panelHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   closeBtn: {
-    fontSize: 20,
-    color: '#9CA3AF',
+    fontSize: 22,
+    color: '#94A3B8',
   },
   clearBtn: {
-    fontSize: 11,
-    color: '#3B82F6',
-    fontWeight: '600',
+    fontSize: 13,
+    color: '#38BDF8',
+    fontWeight: '700',
   },
   resultItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   resultLbl: {
-    fontSize: 12,
-    color: '#9CA3AF',
+    fontSize: 13,
+    color: '#94A3B8',
   },
   resultVal: {
-    fontSize: 12,
-    color: '#F3F4F6',
-    fontWeight: '600',
+    fontSize: 13,
+    color: '#F8FAFC',
+    fontWeight: '700',
   },
   portsHeader: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#9CA3AF',
-    marginTop: 10,
-    marginBottom: 6,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+    marginTop: 12,
+    marginBottom: 8,
   },
   portsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   portBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginRight: 6,
-    marginBottom: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginRight: 8,
+    marginBottom: 8,
   },
   portOpen: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
     borderWidth: 1,
-    borderColor: '#10B981',
+    borderColor: '#34D399',
   },
   portClosed: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: 'rgba(248, 113, 113, 0.15)',
     borderWidth: 1,
-    borderColor: '#EF4444',
+    borderColor: '#F87171',
   },
   portText: {
-    fontSize: 10,
-    color: '#F3F4F6',
+    fontSize: 12,
+    color: '#F8FAFC',
+    fontWeight: '600',
   },
   consoleBox: {
-    height: 120,
-    backgroundColor: '#040711',
-    borderRadius: 8,
-    padding: 8,
+    height: 160,
+    backgroundColor: '#070A12',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   consoleText: {
-    fontSize: 10,
+    fontSize: 12,
     fontFamily: 'monospace',
-    lineHeight: 14,
-    marginBottom: 4,
+    lineHeight: 18,
+    marginBottom: 6,
   },
-  console_system: { color: '#9CA3AF' },
+  console_system: { color: '#94A3B8' },
   console_sent: { color: '#60A5FA' },
   console_recv: { color: '#34D399' },
   console_prog: { color: '#FBBF24' },
   console_err: { color: '#F87171' },
   emptyText: {
-    fontSize: 11,
+    fontSize: 13,
     color: '#64748B',
     textAlign: 'center',
-    paddingVertical: 12,
+    paddingVertical: 16,
   },
   metadataRows: {
     flexDirection: 'column',
-    gap: 8,
+    gap: 10,
   },
   listItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   listName: {
-    fontSize: 11,
-    color: '#F3F4F6',
+    fontSize: 13,
+    color: '#F8FAFC',
     flex: 1,
     marginRight: 10,
+    fontWeight: '500',
   },
   listSub: {
     fontSize: 10,
