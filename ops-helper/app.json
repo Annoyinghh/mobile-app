@@ -12,7 +12,6 @@
     },
     "android": {
       "package": "com.xuzhixuan.netopsrepair",
-      "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.USB_PERMISSION",
         "android.permission.INTERNET",
